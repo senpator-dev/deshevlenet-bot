@@ -3,12 +3,6 @@ import os
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
-# ==============================
-TOKEN = "8794525614:AAHieX4XlvtVhH2flA9KiTxyfNZQAvJ3RlY"
-GROUP_ID = -1003721350098
-THREAD_ID = 1
-# ==============================
-
 logging.basicConfig(level=logging.INFO)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
