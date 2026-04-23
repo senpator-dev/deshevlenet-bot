@@ -1,7 +1,15 @@
 import logging
-import os
+import os  # Этот импорт обязателен
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
+
+# ==============================
+# Теперь берем данные из Variables Railway
+TOKEN = os.getenv("TOKEN")
+# Преобразуем ID в числа, так как из переменных окружения они приходят как строки
+GROUP_ID = int(os.getenv("GROUP_ID")) if os.getenv("GROUP_ID") else 0
+THREAD_ID = int(os.getenv("THREAD_ID")) if os.getenv("THREAD_ID") else 1
+# ==============================
 
 logging.basicConfig(level=logging.INFO)
 
