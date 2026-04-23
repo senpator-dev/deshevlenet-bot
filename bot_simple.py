@@ -26,33 +26,49 @@ WELCOME_TEXT = (
     "<b>Начинаем? Деньги сами себя не сэкономят! 👇</b>"
 )
 
-def send_pixel_event(user_id, event_name, user_data=None):
-    """Отправка события в Facebook Conversions API"""
+def send_pixel_lead(user_id):
+    """Отправка события Lead в Facebook Conversions API"""
     if not PIXEL_ID or not ACCESS_TOKEN:
+        logging.warning("PIXEL_ID или ACCESS_TOKEN не установлены")
         return
+    
     url = f"https://graph.facebook.com/v18.0/{PIXEL_ID}/events"
-    external_id = hashlib.sha256(str(user_id).encode()).hexdigest()
+    event_id = hashlib.sha256(f"{user_id}{time.time()}".encode()).hexdigest()
+    
+    # Хешируем external_id для безопасности (как рекомендует Meta)
+    external_id_hashed = hashlib.sha256(str(user_id).encode()).hexdigest()
+    
     data = {
         "data": [{
-            "event_name": event_name,
+            "event_name": "Lead",
             "event_time": int(time.time()),
+            "event_id": event_id,
             "action_source": "chat",
-            "user_data": {"external_id": [external_id]},
-            "custom_data": user_data or {}
+            "user_data": {
+                "external_id": external_id_hashed,
+            },
+            "custom_data": {
+                "content_name": "Bot Lead",
+                "value": 0,
+                "currency": "USD",
+            }
         }],
         "access_token": ACCESS_TOKEN
     }
+    
     try:
-        requests.post(url, json=data, timeout=5)
-    except Exception as e:
-        logging.error(f"Pixel Error: {e}")
+        response = requests.post(url, json=data, timeout=5)
+        response.raise_for_status()
+        logging.info(f"✅ Lead отправлен в Facebook для пользователя {user_id}")
+    except requests.exceptions.RequestException as e:
+        logging.error(f"❌ Ошибка пикселя: {e}")
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     await update.message.reply_text(WELCOME_TEXT, parse_mode=ParseMode.HTML)
     
-    # Трекинг события Lead в Facebook
-    send_pixel_event(user.id, "Lead", {"content_name": "Start Bot"})
+    # Отправляем Lead в Facebook
+    send_pixel_lead(user.id)
 
     # Создание топика в группе
     try:
@@ -66,11 +82,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.bot_data[f"topic_{user.id}"] = topic.message_thread_id
         context.bot_data[f"user_{topic.message_thread_id}"] = user.id
     except Exception as e:
-        logging.error(f"Topic Error: {e}")
+        logging.error(f"❌ Ошибка топика: {e}")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Юзер -> Группа"""
-    if not update.message or update.message.chat.type != "private": return
+    if not update.message or update.message.chat.type != "private": 
+        return
+    
     user = update.effective_user
     thread_id = context.bot_data.get(f"topic_{user.id}")
 
@@ -81,13 +99,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.bot_data[f"user_{thread_id}"] = user.id
 
     await update.message.forward(chat_id=GROUP_ID, message_thread_id=thread_id)
-    # Трекинг события контакта
-    send_pixel_event(user.id, "Contact")
 
-async def handle_admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Админ -> Юзер"""
-    if not update.message.reply_to_message or update.message.chat_id != GROUP_ID: return
+async def handle_group_to_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Сообщение из группы -> Юзер"""
+    if update.message.chat_id != GROUP_ID: 
+        return
+    
+    # Игнорируем сообщения от бота (чтобы не было эхо)
+    if update.message.from_user.is_bot:
+        return
+    
     thread_id = update.message.message_thread_id
+    if not thread_id:  # если не в ветке, не отправляем
+        return
+    
     user_id = context.bot_data.get(f"user_{thread_id}")
     if user_id:
         await context.bot.copy_message(chat_id=user_id, from_chat_id=GROUP_ID, message_id=update.message.message_id)
@@ -96,7 +121,7 @@ def main():
     app = Application.builder().token(TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND, handle_message))
-    app.add_handler(MessageHandler(filters.Chat(GROUP_ID) & filters.REPLY, handle_admin_reply))
+    app.add_handler(MessageHandler(filters.Chat(GROUP_ID), handle_group_to_user))
     app.run_polling()
 
 if __name__ == "__main__":
