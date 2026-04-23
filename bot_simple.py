@@ -3,13 +3,6 @@ import os
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
-# ==============================
-# Укажи здесь свои данные
-TOKEN = "8794525614:AAHieX4XlvtVhH2flA9KiTxyfNZQAvJ3RlY"
-GROUP_ID = -1003721350098  # Замени на свой ID (должен начинаться с -100)
-THREAD_ID = 1            # Замени на ID темы, иначе уйдет в "General"
-# ==============================
-
 logging.basicConfig(level=logging.INFO)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
