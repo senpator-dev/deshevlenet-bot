@@ -70,7 +70,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Отправляем Lead в Facebook
     send_pixel_lead(user.id)
 
-    # Создание топика в группе
+    # Проверяем, существует ли уже ветка для этого юзера
+    thread_id = context.bot_data.get(f"topic_{user.id}")
+    
+    if thread_id:
+        # Ветка уже есть, не создаем новую
+        return
+    
+    # Создание топика в группе (только если его нет)
     try:
         topic = await context.bot.create_forum_topic(chat_id=GROUP_ID, name=f"{user.first_name} ({user.id})")
         await context.bot.send_message(
