@@ -24,15 +24,18 @@ ACCESS_TOKEN = os.getenv("ACCESS_TOKEN")
 
 logging.basicConfig(level=logging.INFO)
 
-# Тексты
 WELCOME_TEXT = (
     "Привет! 👋\n"
     "Хочешь пополниться со скидкой 20%?\n\n"
     "Выбирай площадку, а мы сделаем твой депозит дешевле всего за 15 минут! 🚀"
 )
 ASK_SUM_TEXT = "На какую сумму пополнение? 💵"
-REMINDER_TEXT = "Привет, ещё ждём твоего ответа! 😊"
 OPERATOR_TEXT = "Подключаем оператора... ⏳"
+
+# Состояния чата
+STATE_START = "START"
+STATE_WAITING_SUM = "WAITING_SUM"
+STATE_IN_CHAT = "IN_CHAT"
 
 # --- Вспомогательные функции ---
 
@@ -53,11 +56,11 @@ def send_pixel_event(user_id, event_name="Lead"):
 
 async def create_admin_topic(update: Update, context: ContextTypes.DEFAULT_TYPE, platform="Не выбрана"):
     user = update.effective_user
+    # Используем bot_data для хранения связки топиков, чтобы данные не терялись при перезагрузке
     thread_id = context.bot_data.get(f"topic_{user.id}")
     
     if not thread_id:
         try:
-            # Создаем ветку в группе
             topic = await context.bot.create_forum_topic(chat_id=GROUP_ID, name=f"{user.first_name} | {platform}")
             thread_id = topic.message_thread_id
             context.bot_data[f"topic_{user.id}"] = thread_id
@@ -66,7 +69,7 @@ async def create_admin_topic(update: Update, context: ContextTypes.DEFAULT_TYPE,
             await context.bot.send_message(
                 chat_id=GROUP_ID,
                 message_thread_id=thread_id,
-                text=f"🔔 <b>Новое сообщение от @{user.username or 'NoUser'} - {user.first_name}</b>\nВыбранная площадка: {platform}",
+                text=f"🔔 <b>Новая заявка!</b>\n👤 Юзер: @{user.username or 'скрыт'}\n🆔 ID: <code>{user.id}</code>\n🎯 Площадка: {platform}",
                 parse_mode=ParseMode.HTML
             )
         except Exception as e:
@@ -76,67 +79,60 @@ async def create_admin_topic(update: Update, context: ContextTypes.DEFAULT_TYPE,
 # --- Обработчики ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Цветные кнопки через эмодзи-маркеры как в конструкторе
+    context.user_data["state"] = STATE_START
     keyboard = [
-        [InlineKeyboardButton("1XBET", callback_data="plat_1XBET")],
-        [InlineKeyboardButton("FONBET", callback_data="plat_FONBET")],
-        [InlineKeyboardButton("BETERA", callback_data="plat_BETERA")],
-        [InlineKeyboardButton("Другое", callback_data="plat_Other")]
+        [InlineKeyboardButton("🟦 1XBET", callback_data="plat_1XBET")],
+        [InlineKeyboardButton("🟥 FONBET", callback_data="plat_FONBET")],
+        [InlineKeyboardButton("🟩 BETERA", callback_data="plat_BETERA")],
+        [InlineKeyboardButton("⬜️ Другое", callback_data="plat_Other")]
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(WELCOME_TEXT, reply_markup=reply_markup)
+    await update.message.reply_text(WELCOME_TEXT, reply_markup=InlineKeyboardMarkup(keyboard))
     send_pixel_event(update.effective_user.id, "StartChat")
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    user_id = query.from_user.id
     platform = query.data.replace("plat_", "")
-    
     await query.answer()
     
-    # 1. Уведомление в админку (Действия 2)
+    # Создаем топик сразу при выборе площадки
     await create_admin_topic(update, context, platform)
     
-    # 2. Запрос суммы
+    # Меняем статус — теперь бот ждет сумму
+    context.user_data["state"] = STATE_WAITING_SUM
+    
     await query.edit_message_text(ASK_SUM_TEXT)
-    
-    # Флаг, что мы ждем именно сумму
-    context.user_data["waiting_for_sum"] = True
-    
-    # 3. Напоминание через 15 минут
-    context.job_queue.run_once(send_reminder, 900, data=user_id, name=f"remind_{user_id}")
-
-async def send_reminder(context: ContextTypes.DEFAULT_TYPE):
-    user_id = context.job.data
-    try: await context.bot.send_message(chat_id=user_id, text=REMINDER_TEXT)
-    except: pass
 
 async def handle_user_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or update.message.chat.type != "private": return
     
     user = update.effective_user
-    
-    # Снимаем напоминание
-    jobs = context.job_queue.get_jobs_by_name(f"remind_{user.id}")
-    for job in jobs: job.schedule_removal()
+    current_state = context.user_data.get("state")
 
-    # Проверяем наличие топика
+    # Получаем или создаем топик
     thread_id = context.bot_data.get(f"topic_{user.id}")
     if not thread_id:
         thread_id = await create_admin_topic(update, context)
 
     # ЛОГИКА ПЕРЕХОДА НА ОПЕРАТОРА
-    if context.user_data.get("waiting_for_sum"):
+    if current_state == STATE_WAITING_SUM:
+        # Это первое сообщение после выбора площадки (сумма)
         await update.message.reply_text(OPERATOR_TEXT)
-        context.user_data["waiting_for_sum"] = False # Сумма получена
-        context.user_data["operator_mode"] = True
+        context.user_data["state"] = STATE_IN_CHAT
         send_pixel_event(user.id, "Lead")
+        
+        # Уведомляем админа в топике, что юзер прислал сумму
+        await context.bot.send_message(
+            chat_id=GROUP_ID,
+            message_thread_id=thread_id,
+            text=f"💰 <b>Клиент указал сумму/реквизиты:</b>\n{update.message.text}",
+            parse_mode=ParseMode.HTML
+        )
 
-    # Пересылка в админку
+    # Просто пересылаем сообщение в топик (для всех состояний)
     await update.message.forward(chat_id=GROUP_ID, message_thread_id=thread_id)
 
 async def handle_admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Ответ только если сообщение в группе и внутри топика
+    # Работаем только в группе и только в топиках
     if update.message.chat_id != GROUP_ID or not update.message.message_thread_id: return
     if update.message.from_user.is_bot: return
     
@@ -144,16 +140,30 @@ async def handle_admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE)
     user_id = context.bot_data.get(f"user_{thread_id}")
     
     if user_id:
-        await context.bot.copy_message(chat_id=user_id, from_chat_id=GROUP_ID, message_id=update.message.message_id)
+        # Копируем сообщение админа пользователю
+        try:
+            await context.bot.copy_message(
+                chat_id=user_id, 
+                from_chat_id=GROUP_ID, 
+                message_id=update.message.message_id
+            )
+        except Exception as e:
+            logging.error(f"Не удалось отправить ответ юзеру: {e}")
 
 def main():
+    # Используем Defaults для упрощения
     app = Application.builder().token(TOKEN).build()
     
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CallbackQueryHandler(button_handler, pattern="^plat_"))
+    
+    # Обработка сообщений от юзера (в личке)
     app.add_handler(MessageHandler(filters.ChatType.PRIVATE & ~filters.COMMAND, handle_user_message))
+    
+    # Обработка ответов админа (в группе)
     app.add_handler(MessageHandler(filters.Chat(GROUP_ID), handle_admin_reply))
     
+    print("Бот запущен...")
     app.run_polling()
 
 if __name__ == "__main__":
