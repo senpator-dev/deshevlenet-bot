@@ -24,13 +24,14 @@ ACCESS_TOKEN = os.getenv("ACCESS_TOKEN")
 
 logging.basicConfig(level=logging.INFO)
 
+# Все тексты теперь жирным шрифтом
 WELCOME_TEXT = (
-    "Привет! 👋\n"
+    "<b>Привет! 👋\n"
     "Хочешь пополниться со скидкой 20%?\n\n"
-    "Выбирай площадку, а мы сделаем твой депозит дешевле всего за 15 минут! 🚀"
+    "Выбирай площадку, а мы сделаем твой депозит дешевле всего за 15 минут! 🚀</b>"
 )
-ASK_SUM_TEXT = "На какую сумму пополнение? 💵"
-OPERATOR_TEXT = "Подключаем оператора... ⏳"
+ASK_SUM_TEXT = "<b>На какую сумму пополнение? 💵</b>"
+OPERATOR_TEXT = "<b>Подключаем оператора... ⏳</b>"
 
 # Состояния
 STATE_START = "START"
@@ -60,7 +61,6 @@ async def create_admin_topic(update: Update, context: ContextTypes.DEFAULT_TYPE,
     
     if not thread_id:
         try:
-            # Создаем топик ПРИ ПЕРВОМ КАСАНИИ (команда /start)
             topic = await context.bot.create_forum_topic(chat_id=GROUP_ID, name=f"{user.first_name} ({user.id})")
             thread_id = topic.message_thread_id
             context.bot_data[f"topic_{user.id}"] = thread_id
@@ -88,16 +88,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     context.user_data["state"] = STATE_START
     
-    # СОЗДАЕМ ЗАЯВКУ СРАЗУ ПРИ ЗАПУСКЕ БОТА
     await create_admin_topic(update, context)
     
+    # Кнопки без цветных эмодзи
     keyboard = [
-        [InlineKeyboardButton("🟦 1XBET", callback_data="plat_1XBET")],
-        [InlineKeyboardButton("🟥 FONBET", callback_data="plat_FONBET")],
-        [InlineKeyboardButton("🟩 BETERA", callback_data="plat_BETERA")],
-        [InlineKeyboardButton("⬜️ Другое", callback_data="plat_Other")]
+        [InlineKeyboardButton("1XBET", callback_data="plat_1XBET")],
+        [InlineKeyboardButton("FONBET", callback_data="plat_FONBET")],
+        [InlineKeyboardButton("BETERA", callback_data="plat_BETERA")],
+        [InlineKeyboardButton("Другое", callback_data="plat_Other")]
     ]
-    await update.message.reply_text(WELCOME_TEXT, reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text(WELCOME_TEXT, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode=ParseMode.HTML)
     send_pixel_event(user.id, "StartChat")
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -106,7 +106,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = query.from_user
     await query.answer()
     
-    # Находим существующий топик и обновляем в нем инфу о выборе площадки
     thread_id = context.bot_data.get(f"topic_{user.id}")
     if thread_id:
         await context.bot.send_message(
@@ -117,7 +116,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     
     context.user_data["state"] = STATE_WAITING_SUM
-    await query.edit_message_text(ASK_SUM_TEXT)
+    await query.edit_message_text(ASK_SUM_TEXT, parse_mode=ParseMode.HTML)
 
 async def handle_user_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or update.message.chat.type != "private": return
@@ -126,13 +125,11 @@ async def handle_user_message(update: Update, context: ContextTypes.DEFAULT_TYPE
     current_state = context.user_data.get("state")
     thread_id = context.bot_data.get(f"topic_{user.id}")
 
-    # Если топика почему-то нет (например, бот перезагрузился), создаем
     if not thread_id:
         thread_id = await create_admin_topic(update, context)
 
-    # ЛОГИКА ПЕРЕХОДА НА ОПЕРАТОРА
     if current_state == STATE_WAITING_SUM:
-        await update.message.reply_text(OPERATOR_TEXT)
+        await update.message.reply_text(OPERATOR_TEXT, parse_mode=ParseMode.HTML)
         context.user_data["state"] = STATE_IN_CHAT
         send_pixel_event(user.id, "Lead")
         
@@ -143,7 +140,6 @@ async def handle_user_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             parse_mode=ParseMode.HTML
         )
 
-    # Пересылка в топик админу
     await update.message.forward(chat_id=GROUP_ID, message_thread_id=thread_id)
 
 async def handle_admin_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
